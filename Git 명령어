@@ -1,0 +1,31 @@
+Git 기본 명령어 학습하기
+.
+
+- 폴더 및 Git Local Repository 생성
+mkdir git
+cd git
+git init
+git config --global user.name "Your-Name"
+git config --global user.email "you@example.com"
+.
+
+- 리소스 생성 및 Staging & Commit
+echo "hello" > hello.txt
+git add hello.txt
+git status
+git commit -m "ist commit"
+.
+
+- GitHub(http://www.github.com) 계정 생성
+Github 에 (Remote) Repository 생성
+Local Repository에 Remote Repository 등록
+git remote add origin https://github.com/~~
+.
+
+- 로컬 리소스를 Remote Repository에 Push
+git push -u origin master
+.
+
+- GitHub 에서 리소스 수정 및 Local 동기화
+Github 에서 코드 수정 및 Commit
+git pull origin master
