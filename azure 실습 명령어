@@ -20,3 +20,4 @@ PW : skcc123!
 11. 확인 ( admin24-aks )
 12. 입력 ( kubectl get all )
 13. 확인 ( service/kubernetes )
+14. DevOps Starter 생성 ( admin24-devops )
