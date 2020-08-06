@@ -11,13 +11,16 @@ PW : skcc123!
  2. 리소스그룹 생성( admin24-rsrcgrp )
  3. 컨테이너 레지스트리 생성 ( admin24 )
  4. Kubenetes 서비스 생성 ( admin24-aks )
- 5. Terminal 연결
- 6. az login ( http://microsoft.com/devicelogin => 화면 코드 입력 )
- 7. AzureCloud 연결정보 확인
- 8. 입력 ( az aks get-credentials --resource-group admin24-rsrcgrp --name admin24-aks )
- 9. 확인( Merged "admin24-aks" as current context in /root/.kube/config )
-10. 입력 ( kubectl config current-context )
-11. 확인 ( admin24-aks )
-12. 입력 ( kubectl get all )
-13. 확인 ( service/kubernetes )
-14. DevOps Starter 생성 ( admin24-devops )
+ 5. acr 과 aks 연결 ( az aks update -n admin24-aks -g admin24-rsrcgrp --attach-acr admin24 )
+ 6. Terminal 연결
+ 7. az login ( http://microsoft.com/devicelogin => 화면 코드 입력 )
+ 8. AzureCloud 연결정보 확인
+ 9. 입력 ( az aks get-credentials --resource-group admin24-rsrcgrp --name admin24-aks )
+10. 확인( Merged "admin24-aks" as current context in /root/.kube/config )
+11. 입력 ( kubectl config current-context )
+12. 확인 ( admin24-aks )
+13. 입력 ( kubectl get all )
+14. 확인 ( service/kubernetes )
+15. DevOps Starter 생성 ( admin24-devops )
+16. admin24-devops-CI 생성
+17. admin24-devops-CD 생성
