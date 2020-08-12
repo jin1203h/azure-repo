@@ -110,3 +110,182 @@ url 호출 (위의 3개가 모두 다 같은 결과)
 
 
 
+
+Istio 설치
+curl -L https://git.io/getLatestIstio | ISTIO_VERSION=1.4.5 sh -
+cd istio-1.4.5
+export PATH=$PWD/bin:$PATH
+for i in install/kubernetes/helm/istio-init/files/crd*yaml; do kubectl apply -f $i; done
+kubectl apply -f install/kubernetes/istio-demo.yaml
+kubectl get pod -n istio-system
+kubectl create namespace istio-cb-ns
+kubectl label namespace istio-cb-ns istio-injection=enabled
+pod & service 생성
+kubectl get all -n istio-cb-ns
+
+
+customercenter 추가 후 변경사항
+gateway 의 application.yml 수정
+        - id: customercenter
+          uri: http://localhost:8083
+          predicates:
+            - Path=/mypages/**
+
+        - id: delivery
+          uri: http://delivery:8080
+          predicates:
+            - Path=/deliveries/**,/cancellations/**
+        - id: customercenter
+          uri: http://customercenter:8080
+          predicates:
+            - Path=/mypages/**
+
+
+ubuntu 에서 maven install
+sudo apt-get install maven
+
+git 에 소스 올리기
+git init
+git add .
+git commit -m "first commit"
+git remote add origin https://github.com/jin1203h/cna-order.git
+git puch -u origin master
+
+push 안되는 경우
+자격 증명 관리자 > windows 자격증명  에서 git 자격 증명 삭제
+
+다른 사람 수정권한 주기
+Seeings > Manage access > Invite a collaborator
+
+ubuntu 로 내리기
+git clone https://github.com/jin1203h/cna-order.git
+cd cna-order
+mvn package
+docker images
+docker build -t admin19.azurecr.io/cna-order:v1 .
+az acr login --name admin19
+docker push admin19.azurecr.io/cna-order:v1
+
+azure portal 에서 확인하기 ====== (CI 처리)
+컨테이너 레지스트리 > 리포지토리 > cna-order > v1
+========================
+
+ubuntu 에서 kafka 설치
+
+헬름이 설치가 안되어 있거나, 버전이 2.xx 일때 카프카 설치 방법
+curl https://raw.githubusercontent.com/kubernetes/helm/master/scripts/get | bash
+kubectl --namespace kube-system create sa tiller      # helm 의 설치관리자를 위한 시스템 사용자 생성
+kubectl create clusterrolebinding tiller --clusterrole cluster-admin --serviceaccount=kube-system:tiller
+helm init --service-account tiller
+
+kubectl patch deploy --namespace kube-system tiller-deploy -p '{"spec":{"template":{"spec":{"serviceAccount":"tiller"}}}}'
+
+helm repo add incubator http://storage.googleapis.com/kubernetes-charts-incubator
+helm repo update
+helm install --name my-kafka --namespace kafka incubator/kafka
+
+watch kubectl get all -n kafka
+
+kubectl get ns
+kubectl delete ns istio-cb-ns
+kubectl create ns cna-shop
+kubectl label ns cna-shop istio-injection=enabled
+kubectl create deploy order --image=admin19.azurecr.io/cna-order:v1 -n cna-shop
+kubectl get all -n cna-shop
+
+확인방법 ====
+kubectl describe pod/order-6dc87d6468-cjfvx -n cna-shop
+kubectl logs -f pod/order-6dc87d6468-cjfvx -c cna-order -n cna-shop
+kubectl edit pod/order-6dc87d6468-cjfvx -n cna-shop
+ImagePullBackOff 인 경우 오타
+확인방법 ====
+
+kubectl expose deploy order --port=8080 -n cna-shop
+kubectl expose deploy gateway --type="LoadBalancer" --port=8080 -n cna-shop
+external-ip => 40.82.133.140
+
+kafka 확인하기
+kubectl -n kafka exec -ti my-kafka-0 -- /usr/bin/kafka-console-consumer --bootstrap-server my-kafka:9092 --topic local --from-beginning
+httpie 수행 (아래)
+httpie 처리하기 위해 들어가기
+kubectl exec -ti pod/httpie -n cna-shop -- /bin/bash
+http http://order:8080 ==> 정상조회 되어야함
+http POST http://order:8080/orders productId=1004 qty=10
+http GET http://order:8080/orders/1
+http GET http://delivery:8080/deliveries/1
+http GET http://delivery:8080/cancellatihttp http://ons/1
+http DELETE http://order:8080/orders/1
+
+http http://40.82.133.140:8080/orders/1
+http POST http://40.82.133.140:8080/orders productId=1004 qty=20
+http GET http://40.82.133.140:8080/orders/3 
+http DELETE http://40.82.133.140:8080/orders/3
+http GET http://40.82.133.140:8080/myPages/3
+httpie local 에서===============
+http POST http://localhost:8088/orders productId=1004 qty=60
+http DELETE http://localhost:8081/orders/9
+http GET http://localhost:8083/myPages
+===================
+
+
+httpie 수행 ============
+cat <<EOF | kubectl apply -f -
+apiVersion: "v1"
+kind: "Pod"
+metadata: 
+  name: httpie
+  namespace: cna-shop
+  labels: 
+    name: httpie
+spec: 
+  containers: 
+    - name: httpie
+      image: clue/httpie
+      command:
+        - sleep
+        - "360000"
+EOF
+======================
+
+kiali 테스트
+========================
+kubectl apply -f - <<EOF
+apiVersion: networking.istio.io/v1alpha3
+kind: DestinationRule
+metadata:
+  name: dr-delivery
+  namespace: cna-shop
+spec:
+  host: delivery
+  trafficPolicy:
+    connectionPool:
+      http:
+        http1MaxPendingRequests: 5
+        maxRequestsPerConnection: 10
+    outlierDetection:
+      interval: 1s
+      consecutiveErrors: 1
+      baseEjectionTime: 3m
+      maxEjectionPercent: 100
+EOF
+========================
+istio tutorial setup
+kubectl get svc -n istio-system
+kubectl edit svc kiali -n istio-system
+:%s/ClusterIP/LoadBalancer/g
+:wq!
+kiali 의 IP/PORT 로 접속
+http://20.194.10.119:20001/kiali/
+id/pw : admin/admin
+
+위의 것 중 5, 10 => 1,1 로 변경 후 처리
+kubectl run siege --image=apexacme/siege -n cna-shop
+kubectl get pod -n cna-shop
+kubectl exec -it siege -n cna-shop -- /bin/bash
+siege -c2 -t5S -v http://order:8080
+siege -c2 -t5S -v http://delivery:8080
+
+
+
+교재
+https://github.com/event-storming/docs/commits?author=acmexii
