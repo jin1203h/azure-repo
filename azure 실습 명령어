@@ -300,8 +300,10 @@ https://github.com/event-storming/docs/commits?author=acmexii
 
 
 
+#############################################################################
+<<<<<<  MSA Sample  >>>>>
 
-MSA Sample
+https://workflowy.com/s/msa/27a0ioMCzlpV04Ib#/98ec94e6e26d
 
 portal.azure.com
 
@@ -406,3 +408,4 @@ kubectl expose deploy ui --type="LoadBalancer" --port=8080
 >> 화면조회 ( UI 서비스 EXTERNAL IP )
 http://40.82.155.229:8080/
 
+#############################################################################
