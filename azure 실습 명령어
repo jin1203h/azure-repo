@@ -289,3 +289,120 @@ siege -c2 -t5S -v http://delivery:8080
 
 교재
 https://github.com/event-storming/docs/commits?author=acmexii
+
+
+
+
+
+
+
+
+
+
+
+
+MSA Sample
+
+portal.azure.com
+
+>> 구독생성 ( 종량제 )
+>> 리소스그룹 생성( resgroup )
+>> 컨테이너 레지스트리 생성 ( conres )
+>> Kubenetes 서비스 생성 ( kubesvc )
+>> Terminal 연결
+az login ( http://microsoft.com/devicelogin => 화면 코드 입력 )
+>> AzureCloud 연결정보 확인
+az aks get-credentials --resource-group resgroup --name kubesvc
+>> 확인 ( Merged "kubesvc" as current context in /root/.kube/config )
+kubectl config current-context
+>> 확인 ( kubesvc )
+>> acr 과 aks 연결
+az aks update -n kubesvc -g resgroup --attach-acr conres
+kubectl version --client
+curl -sL https://aks.ms/InstallAzureCLIDeb
+az login
+az acr login --name conres --expose-token
+
+>> sample 적용 (상품/주문/배달/인증/gateway/UI)
+mkdir MSA-Sample
+cd MSA-Sample/
+git clone https://github.com/event-storming/reqres_products
+cd reqres_products/
+mvn package -Dmaven.test.skip=true
+az acr build --registry conres --image conres.azurecr.io/products:latest .
+kubectl create deploy products --image=conres.azurecr.io/products:latest
+kubectl expose deploy products --type="ClusterIP" --port=8080
+cd ..
+git clone https://github.com/event-storming/reqres_orders.git
+cd reqres_orders/
+mvn package -Dmaven.test.skip=true
+az acr build --registry conres --image conres.azurecr.io/orders:latest .
+kubectl create deploy orders --image=conres.azurecr.io/orders:latest
+kubectl expose deploy orders --type="ClusterIP" --port=8080
+cd ..
+git clone https://github.com/event-storming/reqres_delivery.git
+cd reqres_delivery/
+mvn package -Dmaven.test.skip=true
+az acr build --registry conres --image conres.azurecr.io/delivery:latest .
+kubectl create deploy delivery --image=conres.azurecr.io/delivery:latest
+kubectl expose deploy delivery --type="ClusterIP" --port=8080
+cd ..
+git clone https://github.com/event-storming/oauth.git
+cd oauth
+mvn package -Dmaven.test.skip=true
+az acr build --registry conres --image conres.azurecr.io/oauth:latest .
+kubectl create deploy oauth --image=conres.azurecr.io/oauth:latest
+kubectl expose deploy oauth --type="ClusterIP" --port=8080
+cd ..
+git clone https://github.com/event-storming/gateway.git
+cd gateway/
+mvn package -Dmaven.test.skip=true
+az acr build --registry conres --image conres.azurecr.io/gateway:latest .
+kubectl create deploy gateway --image=conres.azurecr.io/gateway:latest
+kubectl expose deploy gateway --type="LoadBalancer" --port=8080
+cd ..
+curl -sL https://deb.nodesource.com/setup_10.x
+git clone https://github.com/event-storming/ui.git
+cd ui
+npm install
+npm run build
+az acr build --registry conres --image conres.azurecr.io/ui:latest .
+kubectl expose deploy ui --type="LoadBalancer" --port=8080
+kubectl get all
+export IMAGENAME=ui
+_GATEWAY_IP=$(kubectl get -o jsonpath="{.status.loadBalancer.ingress[0].ip}" svc gateway --ignore-not-found)
+echo ${_GATEWAY_IP}
+=========================
+cat <<EOF | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ${IMAGENAME}
+  labels:
+    app: ${IMAGENAME}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ${IMAGENAME}
+  template:
+    metadata:
+      labels:
+        app: ${IMAGENAME}
+    spec:
+      containers:
+        - name: ${IMAGENAME}
+          image: conres.azurecr.io/${IMAGENAME}:latest
+          ports:
+            - containerPort: 8080
+          env:
+            - name: VUE_APP_API_HOST
+              value: http://${_GATEWAY_IP}:8080
+EOF
+=========================
+kubectl expose deploy ui --type="LoadBalancer" --port=8080
+
+
+>> 화면조회 ( UI 서비스 EXTERNAL IP )
+http://40.82.155.229:8080/
+
