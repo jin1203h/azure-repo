@@ -68,6 +68,33 @@ code download
 
 zookeeper / kafka run
 
+cd ../../kafka_2.13-2.6.0\bin\windows
+
+주키퍼 실행을 위하여 새로운 CMD 창을 엽니다.
+cd 카프카설치 경로/bin/windows
+zookeeper-server-start.bat ../../config/zookeeper.properties
+
+카프카 실행을 위하여 새로운 CMD 창을 엽니다.
+cd 카프카설치 경로/bin/windows
+kafka-server-start.bat ../../config/server.properties
+
+토픽 생성과 관리는 zookeeper 가 관리를 합니다. zookeeper는 실행시 기본 2181 포트로 구동됩니다.
+eventTopic 이라는 토픽을 생성 합니다.
+kafka-topics.bat --zookeeper localhost:2181 --topic eventTopic --create --partitions 1 --replication-factor 1
+
+eventTopic 이라는 토픽이 보여야 합니다.
+kafka-topics.bat --zookeeper localhost:2181 --list
+
+eventTopic 이라는 토픽에 메세지를 발행합니다.
+kafka-console-producer.bat --broker-list http://localhost:9092 --topic eventTopic
+위 명령어를 실행 후 > (꺽쇠) 표시로 된 커맨드가 나오면 메세지를 넣어봅니다.
+
+eventTopic 이라는 토픽에 발행된 메세지를 수신합니다.
+kafka-console-consumer.bat --bootstrap-server http://localhost:9092 --topic eventTopic --from-beginning
+3번에서 사용한 메세지가 출력 되어야 합니다.
+–from-beginning 옵션은 해당 토픽에 있는 데이터를 처음부터 출력해 달라는 의미입니다.
+
+
 itelliJ
 Maven : order > Plugins > spring-boot > spring-bootrun
 
