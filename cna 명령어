@@ -1,0 +1,632 @@
+CNA 
+
+[구현] 마이크로서비스의 실행 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+생성된 마이크로 서비스들의 기동
+order 마이크로 서비스를 8081 포트로 실행한다.
+order 서비스의 Application.java 파일로 이동한다.
+14행과 15행 사이의 'Run'을 클릭 후, 5초 정도 지나면 서비스가 터미널 창에서 실행된다.
+새로운 터머널 창에서 netstat -lntp 명령어로 실행중인 서비스 포트를 확인한다.
+기동된 order 서비스를 호출하여 주문 1건을 요청한다.
+http localhost:8081/orders productId=1 productName="TV" qty=3
+주문된 상품을 조회한다.
+http localhost:8081/orders
+주문된 상품을 수정한다.
+http PATCH localhost:8081/orders/1 qty=10
+
+
+[실습] 카프카 연습 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+Kafka 연습
+토픽생성
+/usr/local/kafka/bin/kafka-topics.sh --bootstrap-server http://localhost:9092 --topic topic_example --create --partitions 1 --replication-factor 1
+토픽 리스트 보기
+/usr/local/kafka/bin/kafka-topics.sh --bootstrap-server http://localhost:9092 --list
+새로운 터미널 창에서 kafka producer 연결 후 메세지 publish
+/usr/local/kafka/bin/kafka-console-producer.sh --broker-list http://localhost:9092 --topic topic_example
+새로운 터미널 창에서 kafka consumer 연결 후 메세지 subscribe
+/usr/local/kafka/bin/kafka-console-consumer.sh --bootstrap-server http://localhost:9092 --topic topic_example --from-beginning
+hello world 라는 메세지 publish 해보기
+
+
+[구현] 이벤트 Pub/Sub >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+order 서비스의 이벤트 Publish
+order 마이크로 서비스를 8081 포트로 실행한다.
+order 서비스의 Application.java 파일로 이동한다.
+14행과 15행 사이의 'Run'을 클릭 후, 5초 정도 지나면 서비스가 터미널 창에서 실행된다.
+새로운 터머널 창에서 netstat -lntp 명령어로 실행중인 서비스 포트를 확인한다.
+기동된 order 서비스를 호출하여 주문 1건을 요청한다.
+http localhost:8081/orders productId=1 productName="TV" qty=3
+kafka Consumer에서 이벤트 확인
+/usr/local/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic shopmall --from-beginning
+delivery 서비스의 이벤트 Subscribe
+delivery PolicyHandler.java Code 확인한다.
+
+주석을 해제 하고, delivery 서비스의 Application.java 파일로 이동한다.
+
+14행과 15행 사이의 'Run'을 클릭 후, 5초 정도 지나면 서비스가 터미널 창에서 실행된다.
+
+OrderPlaced 이벤트에 반응하여 DeliveryStarted 이벤트가 연속적으로 발행되는 것을 확인한다.
+
+{"eventType":"OrderPlaced","id":1,"productId":1,"qty":3,"productName":"TV"}
+
+{"eventType":"DeliveryStarted","id":1,"orderId":1,"productId":1,"productName":"TV"}
+
+
+[구현] 이벤트 Pub/Sub - 확장 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+order 서비스의 이벤트 Publish - 확장
+이전 랩에서 주문을 생성하는 OrderPlaced 라는 이벤트를 발행하였다.
+이번 랩에서는 주문서비스에서 주문을 취소하는 OrderCancelled 라는 이벤트를 발행 하고,
+배송 서비스에서는 OrderCancelled 이벤트를 수신하여 DeliveryCancelled 라는 이벤트를 발행한다.
+
+참고: 이벤트 스토밍 결과
+http://msaez.io/#/storming/VdykvRQp3sZo5sXWaKm6iy81wop2/every/d4802f1ac40d4bd0766e116bbd74dae5/-MCoxSwVvX6lSs_UZnoD
+작업순서
+1. 주문 서비스 작업
+1.1 OrderCancelled 이벤트 생성
+
+OrderCancelled.java 파일을 생성 한 후, OrderPlaced.java 파일의 내용을 복사하여 붙여 넣는다.
+public class OrderCancelled 로 클래스명을 변경한다.
+1.2 Aggregate 에서 이벤트 발행
+
+Order.java 에 아래 로직 입력
+@PreRemove
+public void onPreRemove(){
+  OrderCancelled orderCancelled = new OrderCancelled();
+  BeanUtils.copyProperties(this, orderCancelled);
+  orderCancelled.publishAfterCommit();
+}
+1.3 확인
+
+주문 삭제하여 OrderCancelled 이벤트 발행 확인
+주문 서비스 실행 ( 파일 저장여부 확인 )
+http localhost:8081/orders productId=1 productName="TV" qty=3
+http DELETE localhost:8081/orders/1
+kafka Consumer에서 이벤트 확인
+/usr/local/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic shopmall --from-beginning
+2. 배송 서비스 작업
+2.1 OrderCancelled 이벤트 생성
+
+order 서비스의 OrderCancelled.java 파일을 복사하여 delivery 서비스에 붙여넣는다.
+2.2 주문번호에 의하여 배송을 취소 하기 위해서는 주문 ID 별 배송 값을 찾아야 한다.
+
+DeliveryRepository.java 파일에서 아래와 같이 주문아이디별 배송을 찾는 로직을 추가한다.
+List<Delivery> findByOrderId(Long orderId);
+2.3 PolicyHandler 에서 이벤트 수신
+
+PolicyHandler.java 에서 아래와 같은 이벤트 수신시 해야할 작업을 추가한다.
+@StreamListener(KafkaProcessor.INPUT)
+public void wheneverOrderCancelled_DeleteDelivery(@Payload OrderCancelled orderCancelled){
+  if(orderCancelled.isMe()){
+      List<Delivery> deliveryList = deliveryRepository.findByOrderId(orderCancelled.getId());
+      if ((deliveryList != null) && !deliveryList.isEmpty()){
+          deliveryRepository.deleteAll(deliveryList);
+      }
+  }
+}
+2.4 DeliveryCancelled 이벤트 생성
+
+DeliveryCancelled.java 파일을 생성 한 후, DeliveryStarted.java 파일의 내용을 복사하여 붙여 넣는다.
+public class DeliveryCancelled 로 클래스명을 변경한다.
+2.5 Aggregate 에서 이벤트 발행
+
+Delivery.java 에 아래 로직 입력
+@PreRemove
+public void onPreRemove(){
+  DeliveryCancelled deliveryCancelled = new DeliveryCancelled();
+  BeanUtils.copyProperties(this, deliveryCancelled);
+  deliveryCancelled.publishAfterCommit();
+}
+2.6 확인
+
+주문 삭제하여 DeliveryCancelled 이벤트 발행 확인
+주문 서비스 실행 ( 파일 저장여부 확인 )
+http localhost:8081/orders productId=1 productName="TV" qty=3
+http localhost:8081/orders
+http localhost:8082/deliveries
+http DELETE localhost:8081/orders/1
+kafka Consumer에서 이벤트 확인
+/usr/local/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic shopmall --from-beginning
+
+
+[설정] 게이트웨이 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+게이트웨이를 사용하여 모든 API 서버들의 엔드포인트를 단일화
+order 마이크로 서비스를 8081 포트로 실행한다.
+
+gateway 마이크로 서비스를 8080 포트로 실행한다.
+
+기동된 order 서비스를 호출하여 주문 1건을 요청한다.
+
+http localhost:8081/orders productId=1 productName="TV" qty=3
+http localhost:8081/orders
+게이트웨이를 통하여 같은 url 을 port 를 변경하여 실행한다.
+
+http localhost:8080/orders productId=1 productName="PC" qty=1
+http localhost:8080/orders
+delivery 마이크로 서비스를 8082 포트로 실행한다.
+
+게이트웨이서비스의 application.yaml 의 spring.cloud.gateway.routes 에 아래 설정을 추가하여 delivery 서비스으 라우팅을 추가한다. (indent 에 주의해주세요)
+
+  - id: delivery
+    uri: http://localhost:8082
+    predicates:
+      - Path=/deliveries/** 
+게이트웨이 서비스를 재기동 한다.
+
+8082 포트로 delivery 서비스를 호출하여 보고, 8080포트로 게이트웨이를 통하여 delivery 서비스를 호출한다.
+
+http localhost:8082/deliveries
+http localhost:8080/deliveries
+
+
+[pre-lab] spring-boot base >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+maven 에서 스프링부트 어플리케이션 시작
+터미널을 열어서 order 서비스를 실행해본다.
+cd pre-lab-springboot/order
+mvn spring-boot:run
+package 명령으로 jar 파일을 생성후 실행해 본다
+mvn package
+java -jar target/order-0.0.1-SNAPSHOT.jar
+pom.xml 에 기본 설정
+order 서비스의 pom.xml 을 열어본다.
+디펜던시를 추가하여 필요한 라이브러리를 구성한다.
+spring-boot-starter-web 으로 변경 (Tomcat 시작)
+spring-boot-starter-webflux 으로 변경 (Netty 시작)
+리소스 설정
+스프링부트의 기본 리소스 경로는 resource 이다.
+template/1-index.html 폴더의 내용을 복사하여 resource/static/index.html 파일 생성한다.
+서버 시작 후 http localhost:8080 호출하여 index.html 파일 내용을 확인 한다.
+포트 변경
+application.yml 파일에 아래와 같이 8081 포트로 변경
+server:
+  port: 8081
+서버 시작 후 http localhost:8081 로 접속확인
+make REST API
+Controller 패턴
+2-controller 폴더 파일을 order 서비스에 복사한다
+OrderController.java 파일을 참조하여 REST 구성법을 익힌다.
+서버를 실행 후 아래와 같은 명령으로 REST call 을 호출하여 테스트한다.
+http localhost:8081/order
+http POST localhost:8081/order orderId=2 productName=TV qty=2
+http PUT localhost:8081/order/2 productName=RADIO qty=4
+Repository 패턴
+pom.xml 에 다음과 같은 디펜던시 추가
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-rest</artifactId>
+</dependency>
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-data-jpa</artifactId>
+</dependency>
+<dependency>
+  <groupId>com.h2database</groupId>
+  <artifactId>h2</artifactId>
+  <scope>runtime</scope>
+</dependency>
+3-repository 폴더 파일을 order 서비스에 복사한다
+(Order.java 파일을 open 하여 클레스 위에 @Entity 가 있는지 확인)
+Entity 와 Repository 패턴에 의하여 기본적인 REST API 가 생성된다.
+http localhost:8081/orders
+http POST localhost:8081/orders productName=TV qty=2
+http PATCH localhost:8081/orders/1 productName=RADIO qty=4
+call REST API
+4-call-rest-api 폴더 파일을 order 서비스에 복사한다
+ApiController.java 파일을 참조하여 REST 호출법을 익힌다.
+product 서비스에 직접 호출하여 상품 정보 가져오기
+http http://localhost:8082/products/2
+order 서비스를 통하여 상품 정보 가져오기
+http http://localhost:8081/getProduct/2
+order 서비스를 통하여 상품 정보 추가하기
+http POST http://localhost:8081/saveProduct productName=="mic" stock==1
+기타
+env 활용
+product 서비스의 ProductController.java 파일을 열어본다.
+application.yml 파일의 설정값을 코드에서 호출하여 본다.
+http http://localhost:8082/env
+http http://localhost:8082/envDefault
+서비스를 실행시 환경변수를 주입하여 실행한다.
+mvn spring-boot:run -Dspring-boot.run.arguments=--api.url.delivery=http://delivery:8080
+http http://localhost:8082/envDefault
+서비스를 실행시 환경변수를 스프링부트 어플리케이션에서 읽어서 실행한다.
+export _DELIVERY_URL=http://delivery:8080
+mvn spring-boot:run
+repository 활용
+product 서비스의 ProductRepository.java 파일을 참고한다.
+Repository 파일에 쿼리를 적을시 아래 url 에서 확인할 수 있다.
+http http://localhost:8082/products/search
+http http://localhost:8082/products/search/findByName?name=TV
+http http://localhost:8082/products/search/findByName name==TV
+http http://localhost:8082/products/search/findByStockAndName name==TV stock==10
+http http://localhost:8082/products/search/getName?name=TV
+checkPoints 작업가이드
+상품서비스에 CUP 이라는 이름으로 post 로 등록한다.
+주문서비스의 Controller 에서 @GetMapping("/getProductByName") 을 생성한다.
+내부 구현체에 /products/search/findByName 을 호출하는 로직을 구현한다.
+
+
+[구현] Monilith To Mi-Svc 전환 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+모노리식 서비스에서 특정부분을 마이크로 서비스로 전환
+모노리 쇼핑몰 서비스에서 배송 서비스를 분리하고, Feign Client를 사용해 모노리식 쇼핑몰과 분리된 배송 마이크로서비스 연계하는 Lab 이다.
+실습 설명이 긴 관계로 자세한 설명은 msaschool.io 에서 진행한다.
+
+http://msaschool.io/#/%EC%84%A4%EA%B3%84--%EA%B5%AC%ED%98%84--%EC%9A%B4%EC%98%81%EB%8B%A8%EA%B3%84/04_%EA%B5%AC%ED%98%84/05_%EB%AA%A8%EB%85%B8%EB%A6%AC%EC%8A%A4%20to%20MSA%EC%A0%84%ED%99%98
+monolith 서비스 기동 확인 (8088 port)
+
+http localhost:8088
+주문 생성
+
+http localhost:8088/orders productId=1 quantity=3 customerId="1@uengine.org" customerName=“홍길동” customerAddr=“서울시”
+신규 배송 서비스 기동 확인 (8082 port)
+
+http localhost:8082
+
+
+[설정] 장애전파 차단(서킷브레이커 패턴) >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+서킷브레이커를 통하여 장애 전파를 원천 차단
+서킷브레이커 설정 전 호출
+monolith 서비스와 reqres_delivery 서비스를 실행한다.
+부하 툴을 사용하여 주문을 넣어본다.
+siege -c2 -t10S -v --content-type "application/json" 'http://localhost:8088/orders POST {"productId":2,"quantity":1}'
+서킷브레이커 설정
+monolith 서비스의 application.yaml 파일의 27 번째 라인의 주석을 해제한다.
+
+
+feign:
+  hystrix:
+    enabled: true
+
+hystrix:
+  command:
+    # 전역설정
+    default:
+      execution.isolation.thread.timeoutInMilliseconds: 610
+reqres_delivery 서비스의 Delivery.java 에 강제 딜레이 발생 코드를 넣는다.
+
+(49~53 line 주석해제)
+
+
+  try {
+      Thread.currentThread().sleep((long) (400 + Math.random() * 220));
+  } catch (InterruptedException e) {
+      e.printStackTrace();
+  }
+monolith 서비스와 reqres_delivery 서비스를 실행한다.
+
+부하 툴을 사용하여 주문을 넣어본다.
+
+siege -c2 -t10S -v --content-type "application/json" 'http://localhost:8088/orders POST {"productId":2,"quantity":1}'
+fallback 처리를 하여 유연하게 대처
+reqres_delivery 서비스가 중지된 상태로 주문을 넣어본다. ( 500 에러 )
+
+http localhost:8088/orders productId=1 quantity=3
+monolith 서비스의 DeliveryService.java 의 FeignClient에 fallback 옵션을 준다.
+
+@FeignClient(name ="delivery", url="${api.url.delivery}", fallback = DeliveryServiceImpl.class)
+monolith 서비스를 재실행 후 주문을 넣어본다. ( 주문 가능 )
+
+이때 배송 서비스는 중지 상태 이어야 한다.
+DeliveryServiceImpl 의 startDelivery 메서드가 실행되는 것을 확인 할 수 있다.
+checkpoint 체크 방법
+fallback 처리 여부를 확인 하기 위하여 monolith 서비스의 console 창을 선택하고, 상단메뉴의 labs > 결과제출 을 클릭하여 제출한다.
+
+
+[통합] 데이터프로젝션-컴포지트서비스 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+composite 서비스를 생성하여 데이터를 통합한다.
+이론 설명
+
+http://msaschool.io/#/%EC%84%A4%EA%B3%84--%EA%B5%AC%ED%98%84--%EC%9A%B4%EC%98%81%EB%8B%A8%EA%B3%84/05_%ED%86%B5%ED%95%A9/06_%EB%8D%B0%EC%9D%B4%ED%84%B0%20%ED%94%84%EB%A1%9C%EC%A0%9D%EC%85%98
+주문,상품,배송 서비스를 모두 기동한다.
+
+터미널 3개를 열어서 각각의 프로젝트로 이동 한 후, run 을 한다.
+주문서비스 기동(8081)
+cd reqres_orders
+mvn spring-boot:run
+상품서비스 기동(8085)
+cd reqres_products
+mvn spring-boot:run
+배송서비스 기동(8082)
+cd reqres_delivery
+mvn spring-boot:run
+1개의 주문을 생성 한다.
+
+http localhost:8081/orders productId=1 quantity=1 customerId="1@uengine.org" customerName="홍길동" customerAddr="서울시"
+composite_service 서비스를 기동(8088) 한다.
+
+CompositeService.java 파일의 getOrderByCustomerId 메서드 내용을 파악한다.
+
+getOrderByCustomerId 메서드안에서 3개의 서비스를 모두 호출하고, 데이터를 수집하여 보여준다.
+
+http localhost:8088/composite/orders/1@uengine.org
+장애 전파 확인
+주문,배송,상품중 1개의 서비스라도 동작을 안하게 되면 에러가 발생한다.
+
+3개중 1개의 서비스에서 호출이 늦어지면 전체 조회는 늦어진다.
+
+reqres_products 서비스의 ProductController.java 파일의 productStockCheck 을 확인 한다.
+thread.sleep 부분을 주석 해제 한 후, reqres_products 서비스를 재시작한다.
+한개의 서비스가 0.5초 느려졌지만 컴포지트 서비스를 통하여 데이터를 가져오는 api도 전파된 시간만큼 느려진다.
+단점 경험 정리
+주문, 배송, 상품 서비스가 모두 가동중이어야 데이터 조회가 된다.
+주문이력이 많을시에 모든 데이터를 조회 하기때문에 시간이 많이 걸린다.
+각 호출 API 별로 return 되는 data 를 알고 있어야 한다. ( 각 서비스에서 변경시 잦은 변경 요청)
+1개의 서비스에서 호출이 늦어지면 전체 조회는 늦어진다.
+
+
+[통합] 데이터프로젝션-CQRS >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+여러 서비스의 이벤트를 받아서 view 모델을 생성한다.
+order 서비스(8081)와 delivery 서비스(8082)를 실행한다.
+
+cd order
+mvn spring-boot:run
+cd delivery
+mvn spring-boot:run
+orderView 서비스는 모든 이벤트를 수신하여 자신만의 view table 을 구성하는 서비스이다.
+
+orderView 서비스의 PolicyHandler.java 의 로직을 확인한다.
+
+주문을 발송하여 이벤트를 발생시킨다.
+
+주문 발송
+http localhost:8081/orders productId=1 productName="TV" qty=3
+카프카에서 이벤트를 확인 한다.
+
+/usr/local/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic shopmall --from-beginning
+orderView 서비스를 조회하여 주문상태와 배송상태 값을 확인한다.
+
+http localhost:8090/orderStatuses
+checkPoints 작업가이드
+주문 취소
+
+http DELETE localhost:8081/orders/1
+주문상태와 배송상태 값을 확인
+
+http localhost:8090/orderStatuses
+구현 로직은 orderView 서비스의 README.md 파일 확인
+
+
+
+[실습] JWT 토큰을 사용한 Gateway 인증 >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+Gateway 에서 JWT 토큰을 인증한다.
+인증,인가에 대한 자세한 이론은 아래 site 에서 확인한다.
+http://msaschool.io/#/%EC%84%A4%EA%B3%84--%EA%B5%AC%ED%98%84--%EC%9A%B4%EC%98%81%EB%8B%A8%EA%B3%84/03_%EC%84%A4%EA%B3%84/07_%EB%A7%88%EC%9D%B4%ED%81%AC%EB%A1%9C%EC%84%9C%EB%B9%84%EC%8A%A4%20%EB%B3%B4%EC%95%88%EC%84%A4%EA%B3%84
+
+gateway 서비스에서 리소스 서버 역할 등록
+게이트웨이 서비스의 ResourceServerConfiguration.java 파일을 열어본다.
+spring-cloud-gateway 는 webflux 로 기동 되기 때문에 @EnableWebFluxSecurity 를 적용 하여 준다.
+ServerHttpSecurity 를 생성시 oauth2ResourceServer() 리소스 서버 역할을 부여하고 .jwt() 를 선언하여 jwt 형식으로 Authorization 하겠다고 선언한다.
+인가(Authorization)를 위한 JWKSet 주소는 application.yaml 에서 선언하여 준다.
+8090 포트의 서버는 인증(oauth) 서버이다. 인증서버에서 jwks.json 을 열어주어야 사용 가능한 예제 이다.
+
+spring:
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          jwk-set-uri: http://localhost:8090/.well-known/jwks.json
+게이트웨이 서비스와 일반 마이크로 서비스인 order 서비스를 실행한다.
+
+cd gateway
+mvn spring-boot:run
+cd order
+mvn spring-boot:run
+8081 로 기동된 order 서비스를 바로 접근하여 본다. (접근됨)
+
+http localhost:8081/orders
+8088 로 기동된 gateway 서비스를 통하여 접근하여 본다. (401 Unauthorized)
+
+http localhost:8088/orders
+oauth 서버에서 토큰 발급
+토큰을 발급하려면, 사용자가 있어야 한다.
+oauth 서비스의 AuthorizationServerApplication.java 에서 초기 사용자 username=1@uengine.org password=1 으로 등록을 시켜 놓는다.
+인증 서버를 실행한다.
+서버를 실행 후, 토큰을 요청하는 API(/oauth/token) 를 호출하여 토큰을 가져온다.
+이때 Basic 뒤에 들어가는 부분은 base64를 이용하여 인코딩된 CLIENT_ID 와 CLIENT_SECRET 정보이다.
+http --form POST localhost:8090/oauth/token "Authorization: Basic dWVuZ2luZS1jbGllbnQ6dWVuZ2luZS1zZWNyZXQ=" grant_type=password username=1@uengine.org password=1
+가져온 데이터의 "access_token": 부분이 토큰 정보이다. 이 토큰을 이용하여 게이트웨이를 통하여 주문 서비스를 조회한다.
+
+http localhost:8088/orders "Authorization: Bearer $access_token"
+$access_token 부분에 넘어온 토큰 정보를 입력한다.
+토큰정보를 일부러 틀리게 하여 호출하여 본다.
+토큰이 유효한지 체크하여 본다
+
+http --form POST localhost:8090/oauth/check_token token=$access_token
+토큰정보를 일부러 틀리게 하여 호출하여 본다.
+{
+  "error": "invalid_token",
+  "error_description": "Invalid access token"
+}
+
+
+
+[pre-lab] spring-boot test >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+springboot test 작성 연습
+springboot 에서 테스트를 활용하는 자세한 방법은 공식문서를 참고하면 된다.
+https://docs.spring.io/spring-boot/docs/2.3.2.RELEASE/reference/html/spring-boot-features.html#boot-features-testing
+테스트 설정
+springboot (ver 2.3.x) 는 JUnit4 와 JUnit5 를 동시에 사용이 가능하다.
+두가지 버전을 동시에 사용하기때문에 import 시 주의를 해야한다.
+JUnit4 를 사용하기 위해서는 테스트클레스 상단에 @RunWith 어노테이션을 반드시 붙여야한다.
+JUnit5 를 사용하기 위해서는 어노테이션을 안붙이면 된다.
+라이브러리 충돌을 피하기 위해서, JUnit5 만 사용하기를 원한다면 아래와 같이 설정을 하여준다.
+<dependency>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-starter-test</artifactId>
+  <scope>test</scope>
+  <exclusions>
+      <exclusion>
+          <groupId>org.junit.vintage</groupId>
+          <artifactId>junit-vintage-engine</artifactId>
+      </exclusion>
+  </exclusions>
+</dependency>
+Unit test
+product 서비스의 src/test/java/shopmall/ProductTest 를 연다.
+@DataJpaTest 는 JPA 의 Entity 를 테스트 한다.
+
+TestEntityManager 를 통하여 가상의 데이터를 데이터베이스에 넣은 후에, 해당 데이터를 조회해 보는 테스트 이다.
+
+테스트방법
+
+상품_생성_테스트() 를 run 하여 본다.
+mvn test -Dtest=shopmall.ProductControllerTest
+then 부분에 틀린 데이터를 넣어서 에러를 살펴 본다.
+product 서비스의 src/test/java/shopmall/ProductRestTest 를 연다.
+ProductTest 클레스와는 다르게, @RunWith 가 없어서 JUnit5 로 동작한다.
+
+JUnit4 : @Before , JUnit5 : @BeforeEach 로 어노테이션이 변경됨
+
+@RestClientTest 는 Rest call 을 테스트한다.
+
+MockRestServiceServer 를 통하여 가상의 서버를 생성 한 후, 특정 url 로 호출시 productsData.json 데이터를 리턴하는 코드를 생성하였다.
+
+restTemplate 을 사용하여 특정 url을 호출 하고, 결과값을 비교한다.
+
+테스트방법
+
+getProductsTest() 를 run 하여 본다.
+mvn test -Dtest=shopmall.ProductRestTest
+assertThat 부분에 틀린 데이터를 넣어서 에러를 살펴 본다.
+product 서비스의 src/test/java/shopmall/ProductControllerTest 를 연다.
+@WebMvcTest는 MVC 패턴의 Controller 를 테스트 할때 사용한다.
+
+Controller 에는 여러 서비스들을 호출 하는 경우가 많아서, 해당 모듈들을 모두 로딩할 수 없으니, @MockBean 객체로 로딩한다.
+
+given 으로 @MockBean으로 선언된 객체들의 가상의 값을 선언하여 준다.
+
+컨트롤러에 선언된 api 들을 테스트 한다.
+
+테스트방법
+
+productStockCheck() 를 run 하여 본다.
+mvn test -Dtest=shopmall.ProductControllerTest
+andExpect 부분에 틀린 데이터를 넣어서 에러를 살펴 본다.
+andExpect 부분에 stock 을 추가하고, 테스트를 성공시킨다.
+Integration test
+product 서비스의 src/test/java/shopmall/ProductController2Test 를 연다.
+springboot 에서 통합테스트는 @SpringBootTest 어노테이션을 붙인다.
+
+통합테스트는 단위테스와는 다르게, 테스트에 필요한 모든 의존성을 제공한다.
+
+해당 코드는 스프링부트가 기동되면서 application.yaml 파일의 설정값을 읽고, 컨트롤러에서 해당 설정값을 rest call 로 가져오는 예제이다.
+
+테스트방법
+
+getEnvValue() 를 run 하여 본다.
+mvn test -Dtest=shopmall.ProductController2Test
+application.yaml 파일의 api.url.order 의 값을 다르게 변경 한 후 테스트를 다시 돌려서, 테스트 실패하는지 확인한다.
+MockMvcRequestBuilders.get("/envValue") 부분을 "/env" 로 변경하여 테스트를 돌리고, 실패시 어떻게 고칠수 있는지 고민한다.
+해당 서비스가 카프카를 사용시 테스트 코딩 방법
+단위테스트시 해당 서비스가 카프카를 사용중이라면 별도의 코딩이 필요 없다.
+order 서비스의 src/test/java/shopmall/OrderTest 참고
+통합테스트시 해당 서비스가 카프카를 사용중이라면 별도의 코딩이 필요 하다.
+order 서비스의 src/test/java/shopmall/OrderControllerTest 를 연다.
+
+해당 파일을 run 한다.
+mvn test -Dtest=shopmall.OrderControllerTest
+localhost:9092 에 카프카가 기동되어있는 상태에서는 테스트가 성공한다.
+하지만 실제 CI 환경에서는 카프카가 기동되어있지 않고, 카프카를 중지시, 서비스는 카프카를 연결하려고 계속 시도하게 된다.
+
+카프카 서비스를 중지한다.
+$kafka_home/bin/kafka-server-stop.sh
+OrderControllerTest 를 run 한다.
+mvn test -Dtest=shopmall.OrderControllerTest
+could not be established. Broker may not be available 에러가 뜨면서 카프카 연결을 실패하여 테스트가 진행이 안된다.
+ctrl+c 로 서비스를 중지 한다.
+서비스에서 카프카를 연결시 정상적으로 통합 테스트가 되게 하려면 kafka test 디펜던시가 필요하다.
+
+pom.xml 에 아래 디펜던시 추가
+<dependency>
+  <groupId>org.springframework.kafka</groupId>
+  <artifactId>spring-kafka-test</artifactId>
+  <scope>test</scope>
+</dependency>
+application.yaml 에 별도의 profle 을 만들고, 카프카 주소를 ${spring.embedded.kafka.brokers} 로 변경한다.
+
+spring:
+profiles: test
+cloud:
+  stream:
+    kafka:
+      binder:
+        brokers: ${spring.embedded.kafka.brokers}
+이제 통합 테스트를 하려는 파일 (@SpringBootTest) 에서 @EmbeddedKafka 를 선언하여 내부 카프카로 동작을 시킨다.
+
+내부 카프카의 주소는 profiles: test 에 있기 때문에 테스트시 프로파일을 변경하도록 한다. -> @ActiveProfiles("test") 적용
+
+checkPoints 작업가이드
+카프카 서비스 중지
+$kafka_home/bin/kafka-server-stop.sh
+카프카 서비스 실행
+IDE 상단의 labs -> start kafka server
+netstat -anp | grep 9092 실행시 LISTEN 이 되어있으면 됨
+
+
+
+[실습] contract test >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+contract test 실습
+contract test 시나리오
+서비스 정상 작동 확인
+
+상품서비스(8085)와 주문서비스(8081)를 기동한다.
+
+cd orders
+mvn spring-boot:run
+cd products
+mvn spring-boot:run
+주문을 한다.
+
+http http://localhost:8081/orders productId=2 quantity=3 customerId=1@uengine.org
+계약 위반 사항 만들기
+
+주문서비스에서 주문을 할때, 상품서비스의 api 를 호출한다.
+
+Order.java 파일의 restTemplate.getForEntity 확인
+http://상품서비스/product/productId
+상품서비스에서 해당 api 를 item 으로 변경한다.
+
+상품서비스의 ProductController.java 확인
+@GetMapping("/product/{productId}") 을
+@GetMapping("/item/{productId}") 으로 변경
+상품서비스를 재시작 한다.
+
+주문을 한다.
+
+http http://localhost:8081/orders productId=2 quantity=3 customerId=1@uengine.org
+404 에러 발생!!
+
+계약 위반을 금지하기 위하여 contract test 적용
+
+주문 서비스 개발자가, 주문이 실패하였기 때문에 계약서를 작성한다.
+order 서비스의 최상위 root 에 productGet.groovy 파일 참고
+productGet.groovy 파일을 복사하여서, product 서비스의 test/resources/contracts/rest 폴더에 복사를 한다.
+(rest 폴더는 없기때문에 새로 만들어야 합니다.)
+(rest 폴더를 만드는 이유는 productGet.groovy 파일에 package contracts.rest 라고 선언을 하였기 때문입니다.)
+계약서에 의해서 product 서비스의 test or package 를 돌렸을때 에러가 발생한다.
+
+product 서비스의 package 명령을 호출한다.
+cd products
+mvn package
+test fail 에러 발생!!
+계약 위반을 해결하기 위하여 product 서비스는 기존의 /product 라는 api 를 유지 해야한다..
+
+product 서비스의 ProductController.java 에서 @GetMapping("/product/{productId}") 를 다시 생성한다.
+product 서비스의 package 명령을 호출하여 봅니다.
+cd products
+mvn package
+테스트 성공 및 jar 파일 생성 완료!!
+주문서비스에서 테스트
+주문서비스는 상품서비스에서 정상적으로 테스트를 적용하여 배포중인지 테스트를 할 수 있다.
+
+주문서비스가 상품서비스의 api 를 테스트 하기 위해서는 상품서비스에서 stub 파일을 제공해 주어야 한다.
+
+상품 서비스에서 mvn install 을 하여 stub 파일을 생성한다.
+cd products
+mvn install
+주문서비스에서는 만들어진 stub 파일을 바라보며 테스트를 진행한다.
+
+order 서비스의 test/java/com.example.template/ProductContractTest.java 파일참고
+@AutoConfigureStubRunner 에서 주문서비스의 stub 을 바라본다.
+TestRestTemplate 으로 "/product/1" api 를 호출하여 결과값을 비교한다.
+cd orders
+mvn test
+
+
